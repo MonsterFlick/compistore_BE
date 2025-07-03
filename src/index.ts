@@ -1,10 +1,11 @@
 import "reflect-metadata";
 import express from "express";
-import { createConnection } from "typeorm";
+import { createConnection, getConnectionManager } from "typeorm";
 import cors from "cors";
 import dotenv from "dotenv";
 import productRoutes from "./routes/productRoutes";
 import { Product } from "./entity/Product";
+import serverless from "serverless-http";
 
 dotenv.config();
 const app = express();
@@ -22,21 +23,30 @@ app.use(cors({
 }));app.use(express.json());
 app.use("/products", productRoutes);
 
-createConnection({
-  type: process.env.DB_TYPE as any,
-  host: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT || "5432"),
-  username: process.env.DB_USERNAME,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_DATABASE,
-  entities: [Product],
-  synchronize: true,
-  ssl: { rejectUnauthorized: false }
-}).then(() => {
-  const port = parseInt(process.env.PORT || "3000");
-  app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
-  });
-}).catch((err) => {
-  console.error("DB Connection Error:", err);
-});
+let connectionReadyPromise: Promise<any>;
+async function ensureConnection() {
+  const connectionManager = getConnectionManager();
+  if (!connectionManager.has("default")) {
+    connectionReadyPromise = createConnection({
+      type: process.env.DB_TYPE as any,
+      host: process.env.DB_HOST,
+      port: parseInt(process.env.DB_PORT || "5432"),
+      username: process.env.DB_USERNAME,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_DATABASE,
+      entities: [Product],
+      synchronize: true,
+      ssl: { rejectUnauthorized: false }
+    });
+  } else {
+    connectionReadyPromise = Promise.resolve(
+      connectionManager.get("default")
+    );
+  }
+  return connectionReadyPromise;
+}
+const handler = async (req: any, res: any) => {
+  await ensureConnection();
+  return app(req, res);
+};
+export default serverless(handler);
